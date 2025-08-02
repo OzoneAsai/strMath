@@ -34,7 +34,14 @@ class App(tk.Tk):
         self.title("Tkinter Math GUI")
         self.inputs = {}
 
-        option_frame = ttk.Frame(self)
+        main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_pane.pack(fill='both', expand=True)
+
+        # left sidebar
+        left = ttk.Frame(main_pane, width=250)
+        main_pane.add(left, minsize=200)
+
+        option_frame = ttk.Frame(left)
         option_frame.pack(fill='x')
         self.use_fraction = tk.BooleanVar()
         self.use_scientific = tk.BooleanVar(value=True)
@@ -49,18 +56,25 @@ class App(tk.Tk):
         self.output_format.current(0)
         self.output_format.pack(side='left')
 
-        self.feature = ttk.Combobox(self, values=list(FEATURE_FIELDS.keys()))
+        self.feature = ttk.Combobox(left, values=list(FEATURE_FIELDS.keys()))
         self.feature.current(0)
         self.feature.pack(fill='x')
         self.feature.bind("<<ComboboxSelected>>", lambda e: self.build_form())
 
-        self.form = ttk.Frame(self)
-        self.form.pack(fill='x')
+        self.form = ttk.Frame(left)
+        self.form.pack(fill='both', expand=True)
 
-        ttk.Button(self, text="実行", command=self.execute).pack(fill='x')
+        ttk.Button(left, text="実行", command=self.execute).pack(fill='x')
 
-        self.output = scrolledtext.ScrolledText(self, height=10)
-        self.output.pack(fill='both', expand=True)
+        # right pane for output and figures
+        right_pane = tk.PanedWindow(main_pane, orient=tk.VERTICAL)
+        main_pane.add(right_pane)
+
+        self.output = scrolledtext.ScrolledText(right_pane, height=10)
+        right_pane.add(self.output)
+
+        self.fig_frame = ttk.Frame(right_pane)
+        right_pane.add(self.fig_frame)
 
         self.fig_canvas = None
 
@@ -119,7 +133,7 @@ class App(tk.Tk):
             if fig:
                 if self.fig_canvas:
                     self.fig_canvas.get_tk_widget().destroy()
-                self.fig_canvas = FigureCanvasTkAgg(fig, master=self)
+                self.fig_canvas = FigureCanvasTkAgg(fig, master=self.fig_frame)
                 self.fig_canvas.get_tk_widget().pack(fill='both', expand=True)
                 self.fig_canvas.draw()
             elif self.fig_canvas:

@@ -2,7 +2,7 @@ import sys
 import json
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QFormLayout, QLineEdit,
-    QTextEdit, QPushButton, QComboBox, QCheckBox, QLabel
+    QTextEdit, QPushButton, QComboBox, QCheckBox, QLabel, QSplitter
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -39,12 +39,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PyQt5 Math GUI")
         self.inputs = {}
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout()
-        central.setLayout(main_layout)
-
-        # options
+        # left panel widgets
         opt_layout = QFormLayout()
         self.use_fraction = QCheckBox("結果を分数で表示")
         self.use_scientific = QCheckBox("指数表示")
@@ -55,32 +50,43 @@ class MainWindow(QMainWindow):
         opt_layout.addRow(self.use_scientific)
         opt_layout.addRow(QLabel("入力形式"), self.input_format)
         opt_layout.addRow(QLabel("出力形式"), self.output_format)
-        main_layout.addLayout(opt_layout)
 
-        # feature selection
         self.feature_combo = QComboBox()
         self.feature_combo.addItems(FEATURE_FIELDS.keys())
         self.feature_combo.currentTextChanged.connect(self.build_form)
-        main_layout.addWidget(self.feature_combo)
 
-        # dynamic form
         self.form_layout = QFormLayout()
-        main_layout.addLayout(self.form_layout)
 
-        # run button
         self.run_btn = QPushButton("実行")
         self.run_btn.clicked.connect(self.execute)
-        main_layout.addWidget(self.run_btn)
 
-        # output
+        left_panel = QWidget()
+        left_panel.setMinimumWidth(250)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.addLayout(opt_layout)
+        left_layout.addWidget(self.feature_combo)
+        left_layout.addLayout(self.form_layout)
+        left_layout.addWidget(self.run_btn)
+        left_layout.addStretch()
+
+        # right panel widgets
         self.output = QTextEdit()
         self.output.setReadOnly(True)
-        main_layout.addWidget(self.output)
-
-        # figure canvas
         self.canvas = FigureCanvas(Figure())
-        main_layout.addWidget(self.canvas)
         self.canvas.hide()
+        right_splitter = QSplitter(Qt.Vertical)
+        right_splitter.addWidget(self.output)
+        right_splitter.addWidget(self.canvas)
+        right_splitter.setStretchFactor(0, 3)
+        right_splitter.setStretchFactor(1, 2)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_splitter)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
+        self.setCentralWidget(splitter)
 
         self.build_form(self.feature_combo.currentText())
 

@@ -13,6 +13,18 @@ import json
 import re
 import math
 
+# LaTeX文字列を簡易的にSymPyで解釈できる形式へ変換
+def latex_to_sympy(expr: str) -> str:
+    """Convert a LaTeX math expression into a SymPy-parseable string."""
+    expr = expr.replace("\\left", "").replace("\\right", "")
+    expr = re.sub(r"\\times", "*", expr)
+    expr = re.sub(r"\\cdot", "*", expr)
+    expr = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"(\1)/(\2)", expr)
+    expr = expr.replace("^", "**")
+    expr = expr.replace("{", "(").replace("}", ")")
+    expr = expr.replace("\\", "")
+    return expr
+
 # SymPyの結果を分数や形式ごとに表示するユーティリティ
 def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
     """Recursively format SymPy outputs based on user preference and format."""
@@ -67,8 +79,16 @@ def display_response(response, use_fraction=False, output_format="json_sympy"):
 
 def parse_math_input(expr_str, input_format="SymPy"):
     """Parse math expression from SymPy or LaTeX format."""
+    if input_format == "LaTeX":
+        try:
+            return parse_latex(expr_str)
+        except Exception:
+            try:
+                return sympify(latex_to_sympy(expr_str))
+            except Exception as e:
+                raise ValueError(e)
     try:
-        return parse_latex(expr_str) if input_format == "LaTeX" else sympify(expr_str)
+        return sympify(expr_str)
     except Exception as e:
         raise ValueError(e)
 

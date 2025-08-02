@@ -22,6 +22,8 @@ except AttributeError:
 
 # digits beyond which integers are shown in scientific notation
 SCIENTIFIC_DIGITS = 50
+# maximum length before results are tucked into an expander
+MAX_DISPLAY_LENGTH = 2048
 
 # LaTeX文字列を簡易的にSymPyで解釈できる形式へ変換
 def latex_to_sympy(expr: str) -> str:
@@ -38,12 +40,12 @@ def latex_to_sympy(expr: str) -> str:
     return expr
 
 # SymPyの結果を分数や形式ごとに表示するユーティリティ
-def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
+def format_sympy_output(data, use_fraction=False, output_format="json_sympy", use_scientific=True):
     """Recursively format SymPy outputs based on user preference and format."""
     def convert(value):
         if isinstance(value, sp.Integer):
             s = str(value)
-            if len(s) > SCIENTIFIC_DIGITS:
+            if use_scientific and len(s) > SCIENTIFIC_DIGITS:
                 sci = sp.N(value, SCIENTIFIC_DIGITS)
                 return (
                     sp.latex(sci)
@@ -71,6 +73,9 @@ def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
             if use_fraction:
                 frac = Fraction(value).limit_denominator()
                 return sp.latex(frac) if output_format in ("json_latex", "latex_render") else str(frac)
+            if use_scientific and (abs(value) >= 10 ** SCIENTIFIC_DIGITS or (value != 0 and abs(value) < 10 ** -SCIENTIFIC_DIGITS)):
+                formatted = f"{value:.{SCIENTIFIC_DIGITS}e}"
+                return formatted
             return value if output_format == "json_sympy" else str(value)
         if isinstance(value, (list, tuple)):
             return [convert(v) for v in value]
@@ -82,9 +87,9 @@ def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
 
     return convert(data)
 
-def display_response(response, use_fraction=False, output_format="json_sympy"):
+def display_response(response, use_fraction=False, output_format="json_sympy", use_scientific=True):
     """Helper to show responses with optional fraction formatting and formats."""
-    response = format_sympy_output(response, use_fraction, output_format)
+    response = format_sympy_output(response, use_fraction, output_format, use_scientific)
     if output_format == "latex_render":
         if isinstance(response, dict):
             for k, v in response.items():
@@ -92,10 +97,16 @@ def display_response(response, use_fraction=False, output_format="json_sympy"):
                 st.latex(v)
         else:
             st.latex(response)
-    elif output_format == "raw_sympy":
-        st.write(response)
+        return
+    serialized = json.dumps(response if isinstance(response, (dict, list)) else {"result": response}, ensure_ascii=False)
+    if len(serialized) > MAX_DISPLAY_LENGTH:
+        with st.expander("結果"):
+            st.json(response if isinstance(response, (dict, list)) else {"result": response})
     else:
-        st.json(response)
+        if output_format == "raw_sympy":
+            st.write(response)
+        else:
+            st.json(response)
 
 def parse_math_input(expr_str, input_format="SymPy"):
     """Parse math expression from SymPy or LaTeX format."""
@@ -113,7 +124,7 @@ def parse_math_input(expr_str, input_format="SymPy"):
         raise ValueError(e)
 
 
-def record_history(inputs, response, input_format, use_fraction, output_format):
+def record_history(inputs, response, input_format, use_fraction, output_format, use_scientific):
     """Record calculation history with raw and SymPy representations."""
     if "history" not in st.session_state:
         st.session_state["history"] = []
@@ -128,8 +139,8 @@ def record_history(inputs, response, input_format, use_fraction, output_format):
 
     processed_inputs = {k: {"raw": v, "sympy": parse_value(v)} for k, v in inputs.items()}
     processed_outputs = {
-        "raw": format_sympy_output(response, use_fraction, output_format),
-        "sympy": format_sympy_output(response, use_fraction, "raw_sympy"),
+        "raw": format_sympy_output(response, use_fraction, output_format, use_scientific),
+        "sympy": format_sympy_output(response, use_fraction, "raw_sympy", use_scientific),
     }
     st.session_state["history"].append({"input": processed_inputs, "output": processed_outputs})
     if len(st.session_state["history"]) > 100:
@@ -456,6 +467,7 @@ def main():
     # 動的なヘルプ表示
     st.sidebar.markdown("### 使用方法")
     use_fraction = st.sidebar.checkbox("結果を分数で表示", value=False)
+    use_scientific = st.sidebar.checkbox("結果を指数表示", value=True)
     input_format = st.sidebar.selectbox("入力形式", ["SymPy", "LaTeX"])
     output_format_label = st.sidebar.selectbox(
         "出力形式",
@@ -477,8 +489,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"equation": equation}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"equation": equation}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "平方完成":
         st.sidebar.markdown("平方完成を行いたい式を入力してください。例: `x**2 + 4*x + 4`")
@@ -488,8 +500,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"equation": equation}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"equation": equation}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "組合せの計算":
         st.sidebar.markdown("組合せの計算を行います。nCkのnとkを入力してください。")
@@ -497,8 +509,8 @@ def main():
         m = st.number_input("mを入力してください", value=0, min_value=0, step=1)
         if st.button("計算する"):
             response = calculate_combination(n, m)
-            display_response(response, use_fraction, output_format)
-            record_history({"n": n, "m": m}, response, input_format, use_fraction, output_format)
+            display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"n": n, "m": m}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "順列の計算":
         st.sidebar.markdown("順列の計算を行います。nPkのnとkを入力してください。")
@@ -506,8 +518,8 @@ def main():
         m = st.number_input("mを入力してください", value=0, min_value=0, step=1)
         if st.button("計算する"):
             response = calculate_permutation(n, m)
-            display_response(response, use_fraction, output_format)
-            record_history({"n": n, "m": m}, response, input_format, use_fraction, output_format)
+            display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"n": n, "m": m}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "方程式":
         st.sidebar.markdown("方程式を解く場合、=0の形式で入力してください。例: `2*x + 3 = 0`")
@@ -517,8 +529,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"equation": equation}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"equation": equation}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "連立方程式":
         st.sidebar.markdown("方程式をカンマで区切って入力してください。例: `2*x + y = 10, 3*x - y = 5`")
@@ -528,8 +540,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"equations": equations_str}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"equations": equations_str}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "式の計算":
         st.sidebar.markdown("計算したい式を入力してください。例: `2 + 3*4`")
@@ -539,8 +551,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"expression": expression}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"expression": expression}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "カスタム式の計算":
         st.sidebar.markdown("カスタム式を入力してください。例: `x**2 + y**2` (x=3, y=5)")
@@ -550,8 +562,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"expression": custom_expression}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"expression": custom_expression}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "日数の計算":
         st.sidebar.markdown("目標日を入力してください。形式: YYYY-MM-DD")
@@ -561,8 +573,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"target_date": target_date}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"target_date": target_date}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "ランダム数の生成":
         st.sidebar.markdown("ランダム数を生成する範囲とサンプル数を入力してください。")
@@ -574,8 +586,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"start": start, "end": end, "num_samples": num_samples}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"start": start, "end": end, "num_samples": num_samples}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "統計の計算":
         st.sidebar.markdown("データをカンマ区切りで入力してください。例: `1,2,3,4,5`")
@@ -586,8 +598,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"data": data}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"data": data}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "線形回帰の実行":
         st.sidebar.markdown("データポイントをカンマ区切りで入力してください。例: `[1,1], [2,2]`")
@@ -598,8 +610,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"data": data}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"data": data}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "関数のプロット":
         st.sidebar.markdown("Python構文で関数を入力してください。複数の関数をカンマで区切ってください。例: `x+1, x*x+1`")
@@ -621,7 +633,7 @@ def main():
                 "num_points": num_points,
                 "x_label": x_label,
                 "y_label": y_label,
-            }, response, input_format, use_fraction, output_format)
+            }, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "不等式":
         st.sidebar.markdown("解きたい不等式を入力してください。例: `x**2 - 4 > 0`")
@@ -630,8 +642,8 @@ def main():
             try:
                 solution = solve_univariate_inequalityA(inequality_str, symbols('x'))
                 response = {"解": solution}
-                display_response(response, use_fraction, output_format)
-                record_history({"inequality": inequality_str}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+                record_history({"inequality": inequality_str}, response, input_format, use_fraction, output_format, use_scientific)
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
     
@@ -643,8 +655,8 @@ def main():
             try:
                 solution = find_common_region(inequality1_str, inequality2_str)
                 response = {"共通部分": solution}
-                display_response(response, use_fraction, output_format)
-                record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+                record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format, use_scientific)
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
 
@@ -656,8 +668,8 @@ def main():
             try:
                 solution = solve_system_of_inequalities(inequality1_str, inequality2_str)
                 response = {"解": solution}
-                display_response(response, use_fraction, output_format)
-                record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+                record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format, use_scientific)
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
 
@@ -670,8 +682,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"n": n, "k": k}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"n": n, "k": k}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "ベクトル演算":
         st.sidebar.markdown("2つのベクトルを操作します。")
@@ -685,8 +697,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"v1": v1_str, "v2": v2_str, "operation": operation}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"v1": v1_str, "v2": v2_str, "operation": operation}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "行列演算":
         st.sidebar.markdown("2つの行列を操作します。")
@@ -700,8 +712,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"m1": m1_str, "m2": m2_str, "operation": operation}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"m1": m1_str, "m2": m2_str, "operation": operation}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "微分方程式の解法":
         st.sidebar.markdown("常微分方程式 (ODE) を解きます。")
@@ -712,8 +724,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"equation": equation, "dependent_var": dependent_var}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"equation": equation, "dependent_var": dependent_var}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "確率分布の可視化":
         st.sidebar.markdown("確率分布を可視化します。")
@@ -732,7 +744,7 @@ def main():
         if st.button("プロットする"):
             plot_probability_distribution(distribution, params)
             response = {"status": "plotted"}
-            record_history({"distribution": distribution, **params}, response, input_format, use_fraction, output_format)
+            record_history({"distribution": distribution, **params}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "数列の解析":
         st.sidebar.markdown("数列を解析します。")
@@ -743,8 +755,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"sequence": sequence_str}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"sequence": sequence_str}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "単位変換":
         st.sidebar.markdown("物理単位を変換します。")
@@ -756,8 +768,8 @@ def main():
             if "error" in response:
                 st.error(response["error"])
             else:
-                display_response(response, use_fraction, output_format)
-            record_history({"value": value, "from_unit": from_unit, "to_unit": to_unit}, response, input_format, use_fraction, output_format)
+                display_response(response, use_fraction, output_format, use_scientific)
+            record_history({"value": value, "from_unit": from_unit, "to_unit": to_unit}, response, input_format, use_fraction, output_format, use_scientific)
 
     elif selected_function == "幾何学的図形の描画と計算":
         st.sidebar.markdown("幾何学的図形を描画します。")
@@ -774,7 +786,7 @@ def main():
         if st.button("描画する"):
             draw_geometric_shape(shape, params)
             response = {"status": "plotted"}
-            record_history({"shape": shape, **params}, response, input_format, use_fraction, output_format)
+            record_history({"shape": shape, **params}, response, input_format, use_fraction, output_format, use_scientific)
 
     with st.sidebar.container():
         st.markdown("### 履歴")

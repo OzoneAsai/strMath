@@ -20,6 +20,9 @@ try:
 except AttributeError:
     pass
 
+# digits beyond which integers are shown in scientific notation
+SCIENTIFIC_DIGITS = 50
+
 # LaTeX文字列を簡易的にSymPyで解釈できる形式へ変換
 def latex_to_sympy(expr: str) -> str:
     """Convert a LaTeX math expression into a SymPy-parseable string."""
@@ -38,12 +41,15 @@ def latex_to_sympy(expr: str) -> str:
 def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
     """Recursively format SymPy outputs based on user preference and format."""
     def convert(value):
-        if isinstance(value, sp.Expr):
-            val = sp.nsimplify(value) if use_fraction else value
-            if output_format in ("json_latex", "latex_render"):
-                return sp.latex(val)
-            return str(val)
         if isinstance(value, sp.Integer):
+            s = str(value)
+            if len(s) > SCIENTIFIC_DIGITS:
+                sci = sp.N(value, SCIENTIFIC_DIGITS)
+                return (
+                    sp.latex(sci)
+                    if output_format in ("json_latex", "latex_render")
+                    else f"{sci:.{SCIENTIFIC_DIGITS}e}"
+                )
             if output_format in ("json_latex", "latex_render"):
                 return sp.latex(value)
             return str(value) if (use_fraction or output_format != "json_sympy") else int(value)
@@ -52,6 +58,11 @@ def format_sympy_output(data, use_fraction=False, output_format="json_sympy"):
                 val = value if use_fraction else float(value)
                 return sp.latex(val)
             return str(value) if (use_fraction or output_format != "json_sympy") else float(value)
+        if isinstance(value, sp.Expr):
+            val = sp.nsimplify(value) if use_fraction else value
+            if output_format in ("json_latex", "latex_render"):
+                return sp.latex(val)
+            return str(val)
         if isinstance(value, Fraction):
             if output_format in ("json_latex", "latex_render"):
                 return sp.latex(value)

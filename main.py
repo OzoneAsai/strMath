@@ -12,6 +12,13 @@ import numpy as np
 import json
 import re
 import math
+import sys
+
+# allow converting extremely large integers to strings for advanced use cases
+try:
+    sys.set_int_max_str_digits(0)
+except AttributeError:
+    pass
 
 # LaTeX文字列を簡易的にSymPyで解釈できる形式へ変換
 def latex_to_sympy(expr: str) -> str:
@@ -19,6 +26,8 @@ def latex_to_sympy(expr: str) -> str:
     expr = expr.replace("\\left", "").replace("\\right", "")
     expr = re.sub(r"\\times", "*", expr)
     expr = re.sub(r"\\cdot", "*", expr)
+    while "**" in expr:
+        expr = expr.replace("**", "*")
     expr = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"(\1)/(\2)", expr)
     expr = expr.replace("^", "**")
     expr = expr.replace("{", "(").replace("}", ")")

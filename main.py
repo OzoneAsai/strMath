@@ -31,11 +31,17 @@ def latex_to_sympy(expr: str) -> str:
     expr = expr.replace("\\left", "").replace("\\right", "")
     expr = re.sub(r"\\times", "*", expr)
     expr = re.sub(r"\\cdot", "*", expr)
+    expr = re.sub(r"\\div", "/", expr)
     while "**" in expr:
         expr = expr.replace("**", "*")
     expr = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"(\1)/(\2)", expr)
+    expr = re.sub(r"\\sqrt\[([^{}]+)\]\{([^{}]+)\}", r"(\2)**(1/(\1))", expr)
+    expr = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", expr)
+    expr = re.sub(r"\\sqrt\s*([^\\s{}]+)", r"sqrt(\1)", expr)
     expr = expr.replace("^", "**")
     expr = expr.replace("{", "(").replace("}", ")")
+    expr = re.sub(r"\\geqq|\\geq|\\ge", ">=", expr)
+    expr = re.sub(r"\\leqq|\\leq|\\le", "<=", expr)
     expr = expr.replace("\\", "")
     return expr
 
@@ -111,6 +117,8 @@ def display_response(response, use_fraction=False, output_format="json_sympy", u
 def parse_math_input(expr_str, input_format="SymPy"):
     """Parse math expression from SymPy or LaTeX format."""
     if input_format == "LaTeX":
+        if re.search(r"(?<!\\sqrt)\[[^\]]*[a-zA-Z]+[^\]]*\]", expr_str):
+            raise ValueError("単位が含まれています。単位を除去してください。")
         try:
             return parse_latex(expr_str)
         except Exception:
@@ -118,6 +126,9 @@ def parse_math_input(expr_str, input_format="SymPy"):
                 return sympify(latex_to_sympy(expr_str))
             except Exception as e:
                 raise ValueError(e)
+    else:
+        if re.search(r"\\(div|cdot|times|frac)", expr_str):
+            raise ValueError("SymPy形式にLaTeXキーワードが含まれています。")
     try:
         return sympify(expr_str)
     except Exception as e:
@@ -180,7 +191,14 @@ def factorize_equation(equation, input_format):
 def solve_user_equation(equation_str, input_format):
     x, y = symbols('x y')
     try:
-        equation = Eq(parse_math_input(equation_str, input_format), 0)
+        if '=' in equation_str:
+            left, right = equation_str.split('=', 1)
+            equation = Eq(
+                parse_math_input(left.strip(), input_format),
+                parse_math_input(right.strip(), input_format)
+            )
+        else:
+            equation = Eq(parse_math_input(equation_str, input_format), 0)
         solution = solve(equation, x, rational=True)
         return {"x_values": solution}
     except Exception:
@@ -275,25 +293,25 @@ def eval_func(func, x_values):
     return y_values
 
 @st.cache_data
-def solve_univariate_inequalityA(inequality_str, x):
-    inequality = eval(inequality_str)
-    solution = solve_univariate_inequality(inequality, x)
+def solve_univariate_inequalityA(inequality_str, _x, input_format):
+    inequality = parse_math_input(inequality_str, input_format)
+    solution = solve_univariate_inequality(inequality, _x)
     return solution
 
 @st.cache_data
-def find_common_region(inequality1_str, inequality2_str):
+def find_common_region(inequality1_str, inequality2_str, input_format):
     x = symbols('x')
-    inequality1 = eval(inequality1_str)
-    inequality2 = eval(inequality2_str)
+    inequality1 = parse_math_input(inequality1_str, input_format)
+    inequality2 = parse_math_input(inequality2_str, input_format)
     common_region = And(inequality1, inequality2)
     solution = solve_univariate_inequality(common_region, x)
     return solution
 
 @st.cache_data
-def solve_system_of_inequalities(inequality1_str, inequality2_str):
+def solve_system_of_inequalities(inequality1_str, inequality2_str, input_format):
     x = symbols('x')
-    inequality1 = eval(inequality1_str)
-    inequality2 = eval(inequality2_str)
+    inequality1 = parse_math_input(inequality1_str, input_format)
+    inequality2 = parse_math_input(inequality2_str, input_format)
     solution = solve((inequality1, inequality2), x)
     return solution
 
@@ -313,13 +331,20 @@ def solve_system_of_equations(equations_str, input_format):
         variables = sorted(set(re.findall(r'[a-zA-Z]+', equations_str)))
         symbols_dict = symbols(' '.join(variables))
         symbols_tuple = tuple(symbols_dict)
-        equations = [
-            Eq(
-                parse_math_input(eq.split('=')[0].strip(), input_format),
-                parse_math_input(eq.split('=')[1].strip(), input_format)
-            )
-            for eq in equations_str.split(',')
-        ]
+        equations = []
+        for eq in equations_str.split(','):
+            if '=' in eq:
+                left, right = eq.split('=', 1)
+                equations.append(
+                    Eq(
+                        parse_math_input(left.strip(), input_format),
+                        parse_math_input(right.strip(), input_format)
+                    )
+                )
+            else:
+                equations.append(
+                    Eq(parse_math_input(eq.strip(), input_format), 0)
+                )
         solutions = solve(equations, symbols_tuple, dict=True)
         formatted_solutions = [{str(k): v for k, v in solution.items()} for solution in solutions]
         return formatted_solutions
@@ -640,7 +665,7 @@ def main():
         inequality_str = st.text_input("不等式を入力してください")
         if st.button("解く"):
             try:
-                solution = solve_univariate_inequalityA(inequality_str, symbols('x'))
+                solution = solve_univariate_inequalityA(inequality_str, symbols('x'), input_format)
                 response = {"解": solution}
                 display_response(response, use_fraction, output_format, use_scientific)
                 record_history({"inequality": inequality_str}, response, input_format, use_fraction, output_format, use_scientific)
@@ -653,7 +678,7 @@ def main():
         inequality2_str = st.text_input("2つ目の不等式を入力してください")
         if st.button("共通部分を求める"):
             try:
-                solution = find_common_region(inequality1_str, inequality2_str)
+                solution = find_common_region(inequality1_str, inequality2_str, input_format)
                 response = {"共通部分": solution}
                 display_response(response, use_fraction, output_format, use_scientific)
                 record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format, use_scientific)
@@ -666,7 +691,7 @@ def main():
         inequality2_str = st.text_input("2つ目の不等式を入力してください")
         if st.button("解く"):
             try:
-                solution = solve_system_of_inequalities(inequality1_str, inequality2_str)
+                solution = solve_system_of_inequalities(inequality1_str, inequality2_str, input_format)
                 response = {"解": solution}
                 display_response(response, use_fraction, output_format, use_scientific)
                 record_history({"inequality1": inequality1_str, "inequality2": inequality2_str}, response, input_format, use_fraction, output_format, use_scientific)
